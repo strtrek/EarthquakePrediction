@@ -14,51 +14,85 @@
 # limitations under the License.
 import pandas as pd
 
-ChunkSize = 4096
-Steps = 10
+BlockSize = 4096                    # 块行数
+Batches = 100                       # 批量
+ChunkSize = BlockSize * Batches     # 批行数
+Accuracy = 10000000000              # 精度
+Debugging = 0                       # 调试轮询
+pd.set_option('display.max_columns', 10)       # 调试列数
+pd.set_option('display.max_rows', 500)         # 调试行数
+pd.set_option('display.width', 2000)           # 调试宽度
 
 
-train_file_path = "data/train.csv"
-train_data = pd.read_csv(train_file_path, iterator=True, dtype=str)
-loop = True
-chunks = {
-    "start": [0, ],
-    "end": [0, ],
-    "min": [0, ],
-    "min_delta": [0, ],
-}
-indicator = 0
-while loop:
-    try:
-        # Title shifting
-        if indicator == 0:
-            chunk = train_data.get_chunk(ChunkSize * Steps + 1)
-        else:
-            chunk = train_data.get_chunk(ChunkSize * Steps)
-        # Time_to_failure
-        chunk["time"] = chunk.apply(lambda x: int(float(x["time_to_failure"]) * 10000000000), axis=1)
-        # Chunk Statistical
-        for j in range(0, Steps, 1):
-            block_start = ChunkSize * j
-            block_end = (ChunkSize * (j+1))
-            block = chunk[block_start:block_end]
-            print(block)
-            block_min = int(block["time"].min())
-            block_min_delta = abs(chunks["min"][-1] - block_min)
-            chunks["start"].append(block_start + indicator)
-            chunks["end"].append(block_end + indicator)
-            chunks["min_delta"].append(block_min_delta)
-            chunks["min"].append(block_min)
-            # print("START:{0} END:{1} MIN:{2}|{3}".format(block_start, block_end-1, block_min, block_min_delta))
-        # Indicator
-        indicator = indicator + (ChunkSize * Steps)
-        # Debugging
-        if indicator > (ChunkSize * Steps * 3):
+def data_statistical(path, subset: str):
+    data = pd.read_csv(path, iterator=True, dtype=str)
+    loop = True
+    indicator = 0
+    df_stat = pd.DataFrame(columns=["start", "stop", "begin", "end", "min", "max", "mean"])
+    while loop:
+        try:
+            chunk = data.get_chunk(ChunkSize)
+            # Setting accuracy
+            chunk[subset] = chunk.apply(lambda x: int(float(x[subset]) * Accuracy), axis=1)
+            chunk_stat = chunk_statistical(chunk, indicator, subset)
+            df_stat = pd.concat([df_stat, pd.DataFrame(chunk_stat)], ignore_index=True)
+            # Indicator
+            indicator = indicator + len(chunk)
+            # Debugging
+            if (indicator > (ChunkSize * Debugging)) and (Debugging > 0):
+                loop = False
+                print("Iteration is stopped by debugging.")
+        except StopIteration:
             loop = False
-            print("Iteration is stopped by debugging.")
-    except StopIteration:
-        loop = False
-        print("Iteration is stopped.")
-# print(chunks)
-df = pd.DataFrame(chunks)
-print(df)
+            print("Iteration is stopped at {0}.".format(indicator))
+    return {
+        "DataFrame": df_stat,
+        "lines": indicator,
+    }
+
+
+def block_statistical(block: pd.DataFrame, subset: str):
+    return {
+        "begin": block.iloc[0][subset],
+        "end": block.iloc[-1][subset],
+        "mean": int(block[subset].mean()),
+        "min": int(block[subset].min()),
+        "max": int(block[subset].max()),
+    }
+
+
+def chunk_statistical(chunk: pd.DataFrame, indicator: int, subset: str):
+    chunk_stat = {
+        "start": [],
+        "stop": [],
+        "begin": [],
+        "end": [],
+        "min": [],
+        "max": [],
+        "mean": [],
+    }
+    for b in range(0, Batches, 1):
+        block_start = BlockSize * b
+        block_stop = BlockSize * (b+1)
+        block_stat = block_statistical(chunk[block_start:block_stop], subset)
+        chunk_stat["start"].append(block_start + indicator)
+        chunk_stat["stop"].append(block_stop + indicator)
+        chunk_stat["begin"].append(block_stat["begin"])
+        chunk_stat["end"].append(block_stat["end"])
+        chunk_stat["min"].append(block_stat["min"])
+        chunk_stat["max"].append(block_stat["max"])
+        chunk_stat["mean"].append(block_stat["mean"])
+    print("STAT at {0}-{1}".format(indicator, indicator + ChunkSize))
+    return chunk_stat
+
+
+def main():
+    train_file_path = "data/train.csv"
+    dt = data_statistical(train_file_path, "time_to_failure")
+    df = dt["DataFrame"]
+    df.to_excel("data/statistical.xlsx")
+
+
+if __name__ == '__main__':
+    main()
+
