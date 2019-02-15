@@ -13,15 +13,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import pandas as pd
+from datetime import datetime
+from multiprocessing import Pool
+
 
 BlockSize = 4096                    # 块行数
 Batches = 100                       # 批量
 ChunkSize = BlockSize * Batches     # 批行数
 Accuracy = 10000000000              # 精度
-Debugging = 0                       # 调试轮询
-pd.set_option('display.max_columns', 10)       # 调试列数
-pd.set_option('display.max_rows', 500)         # 调试行数
-pd.set_option('display.width', 2000)           # 调试宽度
+Processes = 5                       # 进程数
+Threads = 5                         # 线程数
+Debugging = 2                                   # 调试轮询
+pd.set_option('display.max_columns', 10)        # 调试列数
+pd.set_option('display.max_rows', 500)          # 调试行数
+pd.set_option('display.width', 2000)            # 调试宽度
+
+
+def timer(func):
+    def decor(*args):
+        start_time = datetime.now()
+        func(*args)
+        end_time = datetime.now()
+        d_time = end_time - start_time
+        print("func use : ", d_time)
+        return decor
 
 
 def data_statistical(path, subset: str):
@@ -29,12 +44,14 @@ def data_statistical(path, subset: str):
     loop = True
     indicator = 0
     df_stat = pd.DataFrame(columns=["start", "stop", "begin", "end", "min", "max", "mean"])
+    process_pool = Pool(Processes)                    # 进程池
     while loop:
         try:
             chunk = data.get_chunk(ChunkSize)
             # Setting accuracy
             chunk[subset] = chunk.apply(lambda x: int(float(x[subset]) * Accuracy), axis=1)
-            chunk_stat = chunk_statistical(chunk, indicator, subset)
+            chunk_stat = process_pool.apply(func=chunk_statistical, args=(chunk, indicator, subset))
+            # chunk_stat = chunk_statistical(chunk, indicator, subset)
             df_stat = pd.concat([df_stat, pd.DataFrame(chunk_stat)], ignore_index=True)
             # Indicator
             indicator = indicator + len(chunk)
@@ -45,6 +62,8 @@ def data_statistical(path, subset: str):
         except StopIteration:
             loop = False
             print("Iteration is stopped at {0}.".format(indicator))
+    process_pool.close()
+    process_pool.join()
     return {
         "DataFrame": df_stat,
         "lines": indicator,
@@ -86,11 +105,13 @@ def chunk_statistical(chunk: pd.DataFrame, indicator: int, subset: str):
     return chunk_stat
 
 
+@timer
 def main():
     train_file_path = "data/train.csv"
     dt = data_statistical(train_file_path, "time_to_failure")
     df = dt["DataFrame"]
-    df.to_excel("data/statistical.xlsx")
+    print(df)
+    # df.to_excel("data/statistical.xlsx")
 
 
 if __name__ == '__main__':
