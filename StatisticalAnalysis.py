@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import zmq
 import pandas as pd
 from datetime import datetime
 from multiprocessing import Pool
@@ -23,20 +24,18 @@ ChunkSize = BlockSize * Batches     # 批行数
 Accuracy = 10000000000              # 精度
 Processes = 5                       # 进程数
 Threads = 5                         # 线程数
-Debugging = 2                                   # 调试轮询
+Debugging = 10                                  # 调试轮询
 pd.set_option('display.max_columns', 10)        # 调试列数
 pd.set_option('display.max_rows', 500)          # 调试行数
 pd.set_option('display.width', 2000)            # 调试宽度
 
 
-def timer(func):
-    def decor(*args):
-        start_time = datetime.now()
-        func(*args)
-        end_time = datetime.now()
-        d_time = end_time - start_time
-        print("func use : ", d_time)
-        return decor
+def print_run_time(func):
+    def wrapper(*args, **kw):
+        local_time = datetime.now()
+        func(*args, **kw)
+        print('Function [%s] run %.2f' % (func.__name__, datetime.now() - local_time))
+    return wrapper
 
 
 def data_statistical(path, subset: str):
@@ -105,7 +104,7 @@ def chunk_statistical(chunk: pd.DataFrame, indicator: int, subset: str):
     return chunk_stat
 
 
-@timer
+@print_run_time
 def main():
     train_file_path = "data/train.csv"
     dt = data_statistical(train_file_path, "time_to_failure")
